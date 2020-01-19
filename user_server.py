@@ -30,3 +30,6 @@ class UserServer:
 
     def get_vtx_pos(self, idx):
         pass
+
+server = UserServer()
+server.create_server(port=3002)
