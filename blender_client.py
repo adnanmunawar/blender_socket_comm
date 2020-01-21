@@ -18,11 +18,13 @@ import bpy
 from bpy.props import StringProperty, IntProperty
 import socket
 from collections import Counter
+import time
 
 # Globals
 server_addr = ''
 server_port = 3004
 client = None
+rx_handle = None
 
 
 def connect(addr=None, port=None):
@@ -33,21 +35,31 @@ def connect(addr=None, port=None):
         server_port = port
 
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect((server_addr, server_port))
-    client.setblocking(False)
+    
+    try:
+        client.connect((server_addr, server_port))
+        client.setblocking(False)
+    except socket.error:
+        client = None
+        pass
 
 
 def disconnect():
+    global client
     print('Disconnect Called')
     if client:
+        bpy.app.handlers.scene_update_pre.remove(rx_handle)
         print('Closing Client', client)
         client.close()
+        client = None
 
 
 def client_rx(args):
     try:
         packet = client.recv(1024)
         packet = packet.decode()
+        if packet == "":
+            disconnect()
         try:
             idx, x, y, z = packet.split(',')
             idx = int(idx)
@@ -66,19 +78,21 @@ def client_rx(args):
 class ConnectOperator(bpy.types.Operator):
     """Tooltip"""
     bl_idname = "scene.socket_connect_operator"
-    bl_label = "Connect Operator"
+    bl_label = "Connect To Server"
 
     def execute(self, context):
+        global rx_handle
         if client is None:
             connect(context.scene.server_addr, context.scene.server_port)
             bpy.app.handlers.scene_update_pre.append(client_rx)
+            rx_handle = client_rx
         return {'FINISHED'}
 
 
 class DisconnectOperator(bpy.types.Operator):
     """Tooltip"""
     bl_idname = "scene.socket_disconnect_operator"
-    bl_label = "Disconnect Operator"
+    bl_label = "Disconnect"
 
     def execute(self, context):
         disconnect()
@@ -97,6 +111,7 @@ class BlenderClientPanel(bpy.types.Panel):
     bpy.types.Scene.server_port = IntProperty(name="Server Port", default=3001, description="Server Port")
 
     def draw(self, context):
+        global client
         layout = self.layout
 
         row = layout.row()
@@ -109,9 +124,11 @@ class BlenderClientPanel(bpy.types.Panel):
         row.prop(context.scene, 'server_port')
 
         row = layout.row()
+        row.enabled = not bool(client)
         row.operator('scene.socket_connect_operator')
 
         row = layout.row()
+        row.enabled = bool(client)
         row.operator('scene.socket_disconnect_operator')
 
 
