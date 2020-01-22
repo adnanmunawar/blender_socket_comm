@@ -19,12 +19,21 @@ from bpy.props import StringProperty, IntProperty
 import socket
 from collections import Counter
 import time
+from data_utils import *
 
 # Globals
 server_addr = ''
 server_port = 3004
 client = None
 rx_handle = None
+
+# GRAMMAR
+DISCONNECT = ""
+SET_VTX_POS = "SET_VTX_POS"
+GET_VTX_POS = "GET_VTX_POS"
+
+SET_VTX_POS_VEC_SIZE = 4
+GET_VTX_POS_VEC_SIZE = 1
 
 
 def connect(addr=None, port=None):
@@ -54,28 +63,46 @@ def disconnect():
         client = None
 
 
+def set_vtx_pos(obj, idx, x, y, z):
+    if obj:
+        # print('MOVING VTX(', idx, ') : ', x, y, z)
+        num_vtx = len(obj.data.vertices)
+        if 0 <= idx < num_vtx:
+            obj.data.vertices[idx].co = (x, y, z)
+        else:
+            print('Error, Vtx Idx Invalid')
+
+
+def get_vtx_pos(obj, idx):
+    global client
+    if obj:
+        # print('MOVING VTX(', idx, ') : ', x, y, z)
+        num_vtx = len(obj.data.vertices)
+        if 0 <= idx < num_vtx:
+            pos = obj.data.vertices[idx].co
+            if client:
+                vec = [idx, pos[0], pos[1], pos[2]]
+                data = pack_vector(vec)
+                packet = GET_VTX_POS + data
+                client.send(packet.encode())
+        else:
+            print('Error, Vtx Idx Invalid')
+
+
 def client_rx(args):
     try:
         packet = client.recv(1024)
         packet = packet.decode()
-        if packet == "":
+        if packet == DISCONNECT:
             disconnect()
-        try:
-            idx, x, y, z = packet.split(',')
-            idx = int(idx)
-            x = float(x)
-            y = float(y)
-            z = float(z)
-            # print('MOVING VTX(', idx, ') : ', x, y, z)
-            obj = bpy.context.object
-            if obj:
-                num_vtx = len(obj.data.vertices)
-                if 0 <= idx < num_vtx:
-                    obj.data.vertices[idx].co = (x,y,z)
-                else:
-                    print('Error, Vtx Idx Invalid')
-        except ValueError:
-            pass
+        elif packet.find(GET_VTX_POS) == 0:
+            data = packet.split(GET_VTX_POS)[1]
+            idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
+            get_vtx_pos(bpy.data.object, idx)
+        elif packet.find(SET_VTX_POS):
+            data = packet.split(SET_VTX_POS)[1]
+            idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
+            set_vtx_pos(bpy.data.object, idx, x, y, z)
     except socket.error:
         pass
 

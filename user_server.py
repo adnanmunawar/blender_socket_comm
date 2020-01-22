@@ -1,6 +1,8 @@
 import socket
 import time
 import math
+from data_utils import *
+
 
 class UserServer:
     def __init__(self):
@@ -35,11 +37,18 @@ class UserServer:
             print('Closed Server')
 
     def set_vtx_pos(self, idx, x, y, z):
-        packet = str(idx) + ',' + str(x) + ',' + str(y) + ',' + str(z)
+        data = pack_vector([idx, x, y, z])
+        packet = SET_VTX_POS + data
         self.client.send(packet.encode())
 
     def get_vtx_pos(self, idx):
-        pass
+        data = pack_vector([idx])
+        packet = GET_VTX_POS + data
+        self.client.send(packet.encode())
+
+        packet = self.client.recv(1024)
+        msg = packet.decode()
+        print(msg)
 
     def test_sin_wave_equation(self):
         n_x_vtx = 9
@@ -65,8 +74,9 @@ class UserServer:
                     xp = x_start + x*dx
                     yp = y_start + y*dy
                     zp = z_start + math.sin(t + dx + dy)
+                    print('Vetrex No: ', x*n_x_vtx + y, end="\r")
                     self.set_vtx_pos(x + y*n_y_vtx, xp, yp, zp)
-                    time.sleep(0.0001)
+                    time.sleep(0.001)
 
 
 us = UserServer()
