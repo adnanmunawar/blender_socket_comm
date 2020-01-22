@@ -17,15 +17,32 @@ bl_info = {
 import bpy
 from bpy.props import StringProperty, IntProperty
 import socket
+import threading
 from collections import Counter
 import time
+from _collections import deque
 
+# Globals
+server_addr = ''
+server_port = 3004
+client = None
+rx_handle = None
+
+# GRAMMAR
 DISCONNECT = ""
 SET_VTX_POS = "SET_VTX_POS"
 GET_VTX_POS = "GET_VTX_POS"
+GET_VTX_COUNT = "GET_VTX_COUNT"
 
 SET_VTX_POS_VEC_SIZE = 4
 GET_VTX_POS_VEC_SIZE = 1
+GET_VTX_COUNT_VEC_SIZE = 1
+
+data_queue = deque()
+callback_idx = 0
+th_handle = None
+exit_thread = False
+update_handle = None
 
 
 def pack_vector(vec, precission=3):
@@ -54,25 +71,10 @@ def unpack_vector(data, length=1):
         pass
     return v
 
-# Globals
-server_addr = ''
-server_port = 3004
-client = None
-rx_handle = None
-
-# GRAMMAR
-DISCONNECT = ""
-SET_VTX_POS = "SET_VTX_POS"
-GET_VTX_POS = "GET_VTX_POS"
-GET_VTX_COUNT = "GET_VTX_COUNT"
-
-SET_VTX_POS_VEC_SIZE = 4
-GET_VTX_POS_VEC_SIZE = 1
-GET_VTX_COUNT_VEC_SIZE = 1
-
 
 def connect(addr=None, port=None):
     global server_addr, server_port, client
+    global client_rx, th_handle, exit_thread
     if addr is not None:
         server_addr = addr
     if port is not None:
@@ -83,17 +85,22 @@ def connect(addr=None, port=None):
     try:
         client.connect((server_addr, server_port))
         client.setblocking(False)
+        exit_thread = False
+        th_handle = threading.Thread(target=client_rx)
+        th_handle.start()
     except socket.error:
         client = None
         pass
 
 
 def disconnect():
-    global client
+    global client, exit_thread, th_handle
+    global update_handle
     print('Disconnect Called')
     if client:
-        bpy.app.handlers.scene_update_pre.remove(rx_handle)
+        bpy.app.handlers.scene_update_pre.remove(update_handle)
         print('Closing Client', client)
+        exit_thread = True
         client.close()
         client = None
 
@@ -141,25 +148,48 @@ def get_vtx_pos(obj, idx):
             client.send(packet.encode())
 
 
-def client_rx(args):
-    try:
-        packet = client.recv(1024)
-        packet = packet.decode()
-        if packet == DISCONNECT:
-            disconnect()
-        elif packet == GET_VTX_COUNT:
-            get_vtx_count(bpy.context.object)
-        elif packet.find(GET_VTX_POS) == 0:
-            data = packet.split(GET_VTX_POS)[1]
-            idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
-            idx = int(idx[0])
-            get_vtx_pos(bpy.context.object, idx)
-        elif packet.find(SET_VTX_POS) == 0:
-            data = packet.split(SET_VTX_POS)[1]
-            idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
-            set_vtx_pos(bpy.context.object, idx, x, y, z)
-    except socket.error:
-        pass
+def client_rx(args=None):
+    global data_queue, client, exit_thread
+    while not exit_thread:
+        try:
+            packet = client.recv(1024)
+            packet = packet.decode()
+            data_queue.append(packet)
+        except socket.error:
+            pass
+        time.sleep(0.001)
+
+
+def frame_update_handle(args=None):
+    global data_queue, callback_idx
+    callback_idx = callback_idx + 1
+
+    # Address a max of n request per call
+    max_reqs = 10
+
+    if callback_idx % max_reqs == 0:
+        print(callback_idx, ') ', len(data_queue))
+
+    while max_reqs:
+        try:
+            msg = data_queue.popleft()
+            if msg == DISCONNECT:
+                disconnect()
+            elif msg == GET_VTX_COUNT:
+                get_vtx_count(bpy.context.object)
+            elif msg.find(GET_VTX_POS) == 0:
+                data = msg.split(GET_VTX_POS)[1]
+                idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
+                idx = int(idx[0])
+                get_vtx_pos(bpy.context.object, idx)
+            elif msg.find(SET_VTX_POS) == 0:
+                data = msg.split(SET_VTX_POS)[1]
+                idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
+                set_vtx_pos(bpy.context.object, idx, x, y, z)
+
+        except IndexError:
+            break
+        max_reqs = max_reqs - 1
 
 
 class ConnectOperator(bpy.types.Operator):
@@ -168,11 +198,11 @@ class ConnectOperator(bpy.types.Operator):
     bl_label = "Connect To Server"
 
     def execute(self, context):
-        global rx_handle
+        global rx_handle, update_handle
         if client is None:
             connect(context.scene.server_addr, context.scene.server_port)
-            bpy.app.handlers.scene_update_pre.append(client_rx)
-            rx_handle = client_rx
+            bpy.app.handlers.scene_update_pre.append(frame_update_handle)
+            update_handle = frame_update_handle
         return {'FINISHED'}
 
 

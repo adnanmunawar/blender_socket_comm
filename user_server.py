@@ -92,9 +92,11 @@ class UserServer:
                     percent_complete = 100 * (float(idx) / float(vtx_count))
                     print("Percent Complete, ", percent_complete)
                 # print("Vtx Pos [", i, "] = ", xp, yp, zp, end="\r")
-                zp = z_start + math.sin(5.0*xp*yp)
+                mag_x = 3.0
+                mag_y = 5.0
+                zp = z_start + math.sin(mag_x*xp) + math.cos(mag_y*yp)
                 self.set_vtx_pos(idx, xp, yp, zp)
-                time.sleep(0.05)
+                time.sleep(0.001)
 
 
 us = UserServer()
