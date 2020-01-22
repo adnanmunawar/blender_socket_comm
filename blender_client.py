@@ -20,6 +20,7 @@ import socket
 import threading
 from collections import Counter
 import time
+from _collections import deque
 
 # Globals
 server_addr = ''
@@ -37,11 +38,12 @@ SET_VTX_POS_VEC_SIZE = 4
 GET_VTX_POS_VEC_SIZE = 1
 GET_VTX_COUNT_VEC_SIZE = 1
 
-data_queue = []
+data_queue = deque()
 callback_idx = 0
 th_handle = None
 exit_thread = False
 update_handle = None
+
 
 def pack_vector(vec, precission=3):
     vec_rounded = [round(v, precission) for v in vec]
@@ -152,20 +154,7 @@ def client_rx(args=None):
         try:
             packet = client.recv(1024)
             packet = packet.decode()
-            if packet == DISCONNECT:
-                disconnect()
-            elif packet == GET_VTX_COUNT:
-                get_vtx_count(bpy.context.object)
-            elif packet.find(GET_VTX_POS) == 0:
-                data = packet.split(GET_VTX_POS)[1]
-                idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
-                idx = int(idx[0])
-                get_vtx_pos(bpy.context.object, idx)
-            elif packet.find(SET_VTX_POS) == 0:
-                data = packet.split(SET_VTX_POS)[1]
-                idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
-                #set_vtx_pos(bpy.context.object, idx, x, y, z)
-                data_queue.append(packet)
+            data_queue.append(packet)
         except socket.error:
             pass
         time.sleep(0.001)
@@ -173,9 +162,34 @@ def client_rx(args=None):
 
 def frame_update_handle(args=None):
     global data_queue, callback_idx
-    if callback_idx % 10 == 0:
-        print(callback_idx, ') ', len(data_queue))
     callback_idx = callback_idx + 1
+
+    # Address a max of n request per call
+    max_reqs = 10
+
+    if callback_idx % max_reqs == 0:
+        print(callback_idx, ') ', len(data_queue))
+
+    while max_reqs:
+        try:
+            msg = data_queue.popleft()
+            if msg == DISCONNECT:
+                disconnect()
+            elif msg == GET_VTX_COUNT:
+                get_vtx_count(bpy.context.object)
+            elif msg.find(GET_VTX_POS) == 0:
+                data = msg.split(GET_VTX_POS)[1]
+                idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
+                idx = int(idx[0])
+                get_vtx_pos(bpy.context.object, idx)
+            elif msg.find(SET_VTX_POS) == 0:
+                data = msg.split(SET_VTX_POS)[1]
+                idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
+                set_vtx_pos(bpy.context.object, idx, x, y, z)
+
+        except IndexError:
+            break
+        max_reqs = max_reqs - 1
 
 
 class ConnectOperator(bpy.types.Operator):

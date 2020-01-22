@@ -94,7 +94,7 @@ class UserServer:
                 # print("Vtx Pos [", i, "] = ", xp, yp, zp, end="\r")
                 zp = z_start + math.sin(5.0*xp*yp)
                 self.set_vtx_pos(idx, xp, yp, zp)
-                time.sleep(0.05)
+                time.sleep(0.001)
 
 
 us = UserServer()
