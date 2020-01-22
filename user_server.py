@@ -41,6 +41,14 @@ class UserServer:
         packet = SET_VTX_POS + data
         self.client.send(packet.encode())
 
+    def get_vtx_count(self):
+        packet = GET_VTX_COUNT
+        self.client.send(packet.encode())
+
+        packet = self.client.recv(1024)
+        msg = packet.decode()
+        print(msg)
+
     def get_vtx_pos(self, idx):
         data = pack_vector([idx])
         packet = GET_VTX_POS + data
@@ -74,7 +82,7 @@ class UserServer:
                     xp = x_start + x*dx
                     yp = y_start + y*dy
                     zp = z_start + math.sin(t + dx + dy)
-                    print('Vetrex No: ', x*n_x_vtx + y, end="\r")
+                    print('Vetrex No: ', x*n_x_vtx + y)
                     self.set_vtx_pos(x + y*n_y_vtx, xp, yp, zp)
                     time.sleep(0.001)
 
@@ -82,7 +90,7 @@ class UserServer:
 us = UserServer()
 us.create_server(port=3001)
 
-time.sleep(1)
-us.test_sin_wave_equation()
-us.shutdown_server()
+# time.sleep(1)
+# us.test_sin_wave_equation()
+# us.shutdown_server()
 

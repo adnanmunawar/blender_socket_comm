@@ -1,10 +1,13 @@
+
 # GRAMMAR
 DISCONNECT = ""
 SET_VTX_POS = "SET_VTX_POS"
 GET_VTX_POS = "GET_VTX_POS"
+GET_VTX_COUNT = "GET_VTX_COUNT"
 
 SET_VTX_POS_VEC_SIZE = 4
 GET_VTX_POS_VEC_SIZE = 1
+GET_VTX_COUNT_VEC_SIZE = 1
 
 
 def pack_vector(vec, precission=3):
@@ -24,7 +27,8 @@ def pack_vector(vec, precission=3):
 def unpack_vector(data, length=1):
     v = None
     try:
-        v_str = data.split(',')
+        items = data[data.find("(") + 1:data.find(")")]
+        v_str = items.split(',')
         if length != len(v_str):
             print('Warning! Required Length is not Equal to Actual Length')
         v = [float(v) for v in v_str]

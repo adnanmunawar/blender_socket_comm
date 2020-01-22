@@ -19,7 +19,40 @@ from bpy.props import StringProperty, IntProperty
 import socket
 from collections import Counter
 import time
-from data_utils import *
+
+DISCONNECT = ""
+SET_VTX_POS = "SET_VTX_POS"
+GET_VTX_POS = "GET_VTX_POS"
+
+SET_VTX_POS_VEC_SIZE = 4
+GET_VTX_POS_VEC_SIZE = 1
+
+
+def pack_vector(vec, precission=3):
+    vec_rounded = [round(v, precission) for v in vec]
+    data = '('
+    idx = 0
+    size = len(vec_rounded)
+    for v in vec_rounded:
+        data = data + str(v)
+        idx = idx + 1
+        if idx < size:
+            data = data + ','
+    data = data + ')'
+    return data
+
+
+def unpack_vector(data, length=1):
+    v = None
+    try:
+        items = data[data.find("(")+1:data.find(")")]
+        v_str = items.split(',')
+        if length != len(v_str):
+            print('Warning! Required Length is not Equal to Actual Length')
+        v = [float(v) for v in v_str]
+    except ValueError:
+        pass
+    return v
 
 # Globals
 server_addr = ''
@@ -31,9 +64,11 @@ rx_handle = None
 DISCONNECT = ""
 SET_VTX_POS = "SET_VTX_POS"
 GET_VTX_POS = "GET_VTX_POS"
+GET_VTX_COUNT = "GET_VTX_COUNT"
 
 SET_VTX_POS_VEC_SIZE = 4
 GET_VTX_POS_VEC_SIZE = 1
+GET_VTX_COUNT_VEC_SIZE = 1
 
 
 def connect(addr=None, port=None):
@@ -68,25 +103,42 @@ def set_vtx_pos(obj, idx, x, y, z):
         # print('MOVING VTX(', idx, ') : ', x, y, z)
         num_vtx = len(obj.data.vertices)
         if 0 <= idx < num_vtx:
+            idx = int(idx)
             obj.data.vertices[idx].co = (x, y, z)
         else:
             print('Error, Vtx Idx Invalid')
 
 
+def get_vtx_count(obj):
+    global client
+    if client:
+        if obj:
+            vtx_count = [len(obj.data.vertices)]
+        else:
+            print('Error, No Active Object')
+            vtx_count = [-1]
+
+        data = pack_vector(vtx_count)
+        packet = GET_VTX_COUNT + data
+        client.send(packet.encode())
+
+
 def get_vtx_pos(obj, idx):
     global client
-    if obj:
-        # print('MOVING VTX(', idx, ') : ', x, y, z)
-        num_vtx = len(obj.data.vertices)
-        if 0 <= idx < num_vtx:
-            pos = obj.data.vertices[idx].co
-            if client:
+    if client:
+        if obj:
+            # print('MOVING VTX(', idx, ') : ', x, y, z)
+            vtx_count = len(obj.data.vertices)
+            if 0 <= idx < vtx_count:
+                pos = obj.data.vertices[idx].co
                 vec = [idx, pos[0], pos[1], pos[2]]
-                data = pack_vector(vec)
-                packet = GET_VTX_POS + data
-                client.send(packet.encode())
-        else:
-            print('Error, Vtx Idx Invalid')
+            else:
+                print('Error, Vtx Idx Invalid')
+                vec = [-1, 999, 999, 999]
+
+            data = pack_vector(vec)
+            packet = GET_VTX_POS + data
+            client.send(packet.encode())
 
 
 def client_rx(args):
@@ -95,14 +147,17 @@ def client_rx(args):
         packet = packet.decode()
         if packet == DISCONNECT:
             disconnect()
+        elif packet == GET_VTX_COUNT:
+            get_vtx_count(bpy.context.object)
         elif packet.find(GET_VTX_POS) == 0:
             data = packet.split(GET_VTX_POS)[1]
             idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
-            get_vtx_pos(bpy.data.object, idx)
-        elif packet.find(SET_VTX_POS):
+            idx = int(idx[0])
+            get_vtx_pos(bpy.context.object, idx)
+        elif packet.find(SET_VTX_POS) == 0:
             data = packet.split(SET_VTX_POS)[1]
             idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
-            set_vtx_pos(bpy.data.object, idx, x, y, z)
+            set_vtx_pos(bpy.context.object, idx, x, y, z)
     except socket.error:
         pass
 
