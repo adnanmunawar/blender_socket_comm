@@ -67,8 +67,13 @@ def client_rx(args):
             y = float(y)
             z = float(z)
             # print('MOVING VTX(', idx, ') : ', x, y, z)
-            if bpy.context.object:
-                bpy.context.object.data.vertices[idx].co = (x,y,z)
+            obj = bpy.context.object
+            if obj:
+                num_vtx = len(obj.data.vertices)
+                if 0 <= idx < num_vtx:
+                    obj.data.vertices[idx].co = (x,y,z)
+                else:
+                    print('Error, Vtx Idx Invalid')
         except ValueError:
             pass
     except socket.error:

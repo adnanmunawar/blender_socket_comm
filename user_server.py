@@ -1,6 +1,6 @@
 import socket
 import time
-
+import math
 
 class UserServer:
     def __init__(self):
@@ -41,8 +41,38 @@ class UserServer:
     def get_vtx_pos(self, idx):
         pass
 
+    def test_sin_wave_equation(self):
+        n_x_vtx = 9
+        n_y_vtx = 9
+
+        x_start = -1.0
+        y_start = -1.0
+        z_start = 0.0
+
+        x_range = 1.0
+        y_range = 1.0
+        z_range = 1.0
+
+        start_time = time.time()
+
+        dx = x_range / (n_x_vtx - 1)
+        dy = y_range / (n_y_vtx - 1)
+
+        while time.time() - start_time < 5.0:
+            for x in range(0, n_x_vtx):
+                for y in range(0, n_y_vtx):
+                    t = time.time() - start_time
+                    xp = x_start + x*dx
+                    yp = y_start + y*dy
+                    zp = z_start + math.sin(t + dx + dy)
+                    self.set_vtx_pos(x + y*n_y_vtx, xp, yp, zp)
+                    time.sleep(0.0001)
+
+
 us = UserServer()
 us.create_server(port=3001)
-time.sleep(3)
+
+time.sleep(1)
+us.test_sin_wave_equation()
 us.shutdown_server()
 
