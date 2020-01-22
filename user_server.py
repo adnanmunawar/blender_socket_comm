@@ -46,8 +46,14 @@ class UserServer:
         self.client.send(packet.encode())
 
         packet = self.client.recv(1024)
-        msg = packet.decode()
-        print(msg)
+        packet = packet.decode()
+        # print(packet)
+
+        if packet.find(GET_VTX_COUNT) == 0:
+            data = packet.split(GET_VTX_COUNT)[1]
+            v = unpack_vector(data, GET_VTX_COUNT_VEC_SIZE)
+
+        return int(v[0])
 
     def get_vtx_pos(self, idx):
         data = pack_vector([idx])
@@ -55,42 +61,46 @@ class UserServer:
         self.client.send(packet.encode())
 
         packet = self.client.recv(1024)
-        msg = packet.decode()
-        print(msg)
+
+        packet = packet.decode()
+        # print(packet)
+
+        if packet.find(GET_VTX_POS) == 0:
+            data = packet.split(GET_VTX_POS)[1]
+            v = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
+
+        return v
 
     def test_sin_wave_equation(self):
-        n_x_vtx = 9
-        n_y_vtx = 9
 
-        x_start = -1.0
-        y_start = -1.0
+        vtx_count = self.get_vtx_count()
+        n_x_vtx = int(math.sqrt(vtx_count))
+        n_y_vtx = int(math.sqrt(vtx_count))
+
+        print("Vertex Count: ", vtx_count)
+
         z_start = 0.0
-
-        x_range = 1.0
-        y_range = 1.0
-        z_range = 1.0
 
         start_time = time.time()
 
-        dx = x_range / (n_x_vtx - 1)
-        dy = y_range / (n_y_vtx - 1)
-
-        while time.time() - start_time < 5.0:
-            for x in range(0, n_x_vtx):
-                for y in range(0, n_y_vtx):
-                    t = time.time() - start_time
-                    xp = x_start + x*dx
-                    yp = y_start + y*dy
-                    zp = z_start + math.sin(t + dx + dy)
-                    print('Vetrex No: ', x*n_x_vtx + y)
-                    self.set_vtx_pos(x + y*n_y_vtx, xp, yp, zp)
-                    time.sleep(0.001)
+        for x in range(0, n_x_vtx):
+            for y in range(0, n_y_vtx):
+                t = time.time() - start_time
+                idx = x*n_x_vtx + y
+                i, xp, yp, zp = self.get_vtx_pos(idx)
+                if idx % 10 == 0:
+                    percent_complete = 100 * (float(idx) / float(vtx_count))
+                    print("Percent Complete, ", percent_complete)
+                # print("Vtx Pos [", i, "] = ", xp, yp, zp, end="\r")
+                zp = z_start + math.sin(5.0*xp*yp)
+                self.set_vtx_pos(idx, xp, yp, zp)
+                time.sleep(0.05)
 
 
 us = UserServer()
-us.create_server(port=3001)
+us.create_server(port=3002)
 
-# time.sleep(1)
-# us.test_sin_wave_equation()
-# us.shutdown_server()
+time.sleep(1)
+us.test_sin_wave_equation()
+us.shutdown_server()
 
