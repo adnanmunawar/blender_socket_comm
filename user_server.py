@@ -2,7 +2,7 @@ import socket
 import time
 import math
 from data_utils import *
-
+from random import random
 
 class UserServer:
     def __init__(self):
@@ -83,6 +83,9 @@ class UserServer:
 
         start_time = time.time()
 
+        mag_x = round((random() * 6), 2)
+        mag_y = round((random() * 6), 2)
+
         for x in range(0, n_x_vtx):
             for y in range(0, n_y_vtx):
                 t = time.time() - start_time
@@ -92,9 +95,7 @@ class UserServer:
                     percent_complete = 100 * (float(idx) / float(vtx_count))
                     print("Percent Complete, ", percent_complete)
                 # print("Vtx Pos [", i, "] = ", xp, yp, zp, end="\r")
-                mag_x = 3.0
-                mag_y = 5.0
-                zp = z_start + math.sin(mag_x*xp) + math.cos(mag_y*yp)
+                zp = z_start + (math.sin(mag_x*xp) + math.cos(mag_y*yp)) / 4
                 self.set_vtx_pos(idx, xp, yp, zp)
                 time.sleep(0.001)
 

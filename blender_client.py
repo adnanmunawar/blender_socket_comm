@@ -6,7 +6,7 @@ bl_info = {
     "name": "Socket Client for Blender",
     "author": "Adnan Munawar",
     "version": (0, 1),
-    "blender": (2, 79, 0),
+    "blender": (2, 81, 0),
     "location": "View3D > Tool > SocketClient",
     "description": "",
     "warning": "",
@@ -21,6 +21,7 @@ import threading
 from collections import Counter
 import time
 from _collections import deque
+import functools
 
 # Globals
 server_addr = ''
@@ -42,7 +43,7 @@ data_queue = deque()
 callback_idx = 0
 th_handle = None
 exit_thread = False
-update_handle = None
+update_handle = []
 
 
 def pack_vector(vec, precission=3):
@@ -98,7 +99,9 @@ def disconnect():
     global update_handle
     print('Disconnect Called')
     if client:
-        bpy.app.handlers.scene_update_pre.remove(update_handle)
+        for h in update_handle:
+            if bpy.app.timers.is_registered(h):
+                bpy.app.timers.unregister(h)
         print('Closing Client', client)
         exit_thread = True
         client.close()
@@ -157,15 +160,15 @@ def client_rx(args=None):
             data_queue.append(packet)
         except socket.error:
             pass
-        time.sleep(0.001)
+        time.sleep(0.0005)
 
 
-def frame_update_handle(args=None):
+def frame_update_handle(object):
     global data_queue, callback_idx
     callback_idx = callback_idx + 1
 
     # Address a max of n request per call
-    max_reqs = 10
+    max_reqs = 30
 
     if callback_idx % max_reqs == 0:
         print(callback_idx, ') ', len(data_queue))
@@ -176,20 +179,21 @@ def frame_update_handle(args=None):
             if msg == DISCONNECT:
                 disconnect()
             elif msg == GET_VTX_COUNT:
-                get_vtx_count(bpy.context.object)
+                get_vtx_count(object)
             elif msg.find(GET_VTX_POS) == 0:
                 data = msg.split(GET_VTX_POS)[1]
                 idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
                 idx = int(idx[0])
-                get_vtx_pos(bpy.context.object, idx)
+                get_vtx_pos(object, idx)
             elif msg.find(SET_VTX_POS) == 0:
                 data = msg.split(SET_VTX_POS)[1]
                 idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
-                set_vtx_pos(bpy.context.object, idx, x, y, z)
+                set_vtx_pos(object, idx, x, y, z)
 
         except IndexError:
             break
         max_reqs = max_reqs - 1
+    return 0.005
 
 
 class ConnectOperator(bpy.types.Operator):
@@ -201,8 +205,11 @@ class ConnectOperator(bpy.types.Operator):
         global rx_handle, update_handle
         if client is None:
             connect(context.scene.server_addr, context.scene.server_port)
-            bpy.app.handlers.scene_update_pre.append(frame_update_handle)
-            update_handle = frame_update_handle
+            for i in range(0, 1):
+                fn = functools.partial(frame_update_handle, bpy.context.object)
+                bpy.app.timers.register(fn)
+                update_handle.append(fn)
+            
         return {'FINISHED'}
 
 
@@ -221,7 +228,7 @@ class BlenderClientPanel(bpy.types.Panel):
     bl_label = "Blender Client Panel"
     bl_idname = "Blender_PT_Client"
     bl_space_type = 'VIEW_3D'
-    bl_region_type = 'TOOLS'
+    bl_region_type = 'UI'
     bl_category = "SocketClient"
 
     bpy.types.Scene.server_addr = StringProperty(name="Server Addr", default="localhost", description="Server Addr")
