@@ -163,7 +163,7 @@ def client_rx(args=None):
         time.sleep(0.0005)
 
 
-def frame_update_handle(object):
+def timer_update_func(object):
     global data_queue, callback_idx
     callback_idx = callback_idx + 1
 
@@ -206,7 +206,7 @@ class ConnectOperator(bpy.types.Operator):
         if client is None:
             connect(context.scene.server_addr, context.scene.server_port)
             for i in range(0, 1):
-                fn = functools.partial(frame_update_handle, bpy.context.object)
+                fn = functools.partial(timer_update_func, bpy.context.object)
                 bpy.app.timers.register(fn)
                 update_handle.append(fn)
             
