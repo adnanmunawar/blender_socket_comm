@@ -41,6 +41,11 @@ class UserServer:
         packet = SET_VTX_POS + data
         self.client.send(packet.encode())
 
+    def set_obj_pose(self, x, y, z, roll, pitch, yaw):
+        data = pack_vector([x, y, z, roll, pitch, yaw])
+        packet = SET_OBJ_POSE + data
+        self.client.send(packet.encode())
+
     def get_vtx_count(self):
         packet = GET_VTX_COUNT
         self.client.send(packet.encode())
@@ -100,10 +105,13 @@ class UserServer:
                 time.sleep(0.001)
 
 
-us = UserServer()
-us.create_server(port=3002)
+# us = UserServer()
+# us.create_server(port=3002)
+#
+# time.sleep(1)
+# Set the x,y,z position and roll, pitch, yaw
+# us.set_obj_pose(1, 1, 1, 0, 0, 0)
 
-time.sleep(1)
-us.test_sin_wave_equation()
-us.shutdown_server()
+# us.test_sin_wave_equation()
+# us.shutdown_server()
 

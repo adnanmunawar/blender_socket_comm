@@ -32,10 +32,12 @@ rx_handle = None
 # GRAMMAR
 DISCONNECT = ""
 SET_VTX_POS = "SET_VTX_POS"
+SET_OBJ_POSE = "SET_OBJ_POSE"
 GET_VTX_POS = "GET_VTX_POS"
 GET_VTX_COUNT = "GET_VTX_COUNT"
 
 SET_VTX_POS_VEC_SIZE = 4
+SET_OBJ_POSE_VEC_SIZE = 6
 GET_VTX_POS_VEC_SIZE = 1
 GET_VTX_COUNT_VEC_SIZE = 1
 
@@ -117,6 +119,12 @@ def set_vtx_pos(obj, idx, x, y, z):
             obj.data.vertices[idx].co = (x, y, z)
         else:
             print('Error, Vtx Idx Invalid')
+            
+            
+def set_obj_pose(obj, x, y, z, ro, pi, ya):
+    if obj:
+        obj.matrix_world.translation = (x, y, z)
+        obj.rotation_euler = (ro, pi, ya)
 
 
 def get_vtx_count(obj):
@@ -172,6 +180,9 @@ def timer_update_func(object):
 
     if callback_idx % max_reqs == 0:
         print(callback_idx, ') ', len(data_queue))
+        
+    ee_obj = bpy.context.scene.ee_object
+    sb_obj = bpy.context.scene.sb_object
 
     while max_reqs:
         try:
@@ -179,16 +190,20 @@ def timer_update_func(object):
             if msg == DISCONNECT:
                 disconnect()
             elif msg == GET_VTX_COUNT:
-                get_vtx_count(object)
+                get_vtx_count(sb_obj)
             elif msg.find(GET_VTX_POS) == 0:
                 data = msg.split(GET_VTX_POS)[1]
                 idx = unpack_vector(data, GET_VTX_POS_VEC_SIZE)
                 idx = int(idx[0])
-                get_vtx_pos(object, idx)
+                get_vtx_pos(sb_obj, idx)
             elif msg.find(SET_VTX_POS) == 0:
                 data = msg.split(SET_VTX_POS)[1]
                 idx, x, y, z = unpack_vector(data, SET_VTX_POS_VEC_SIZE)
-                set_vtx_pos(object, idx, x, y, z)
+                set_vtx_pos(sb_obj, idx, x, y, z)
+            elif msg.find(SET_OBJ_POSE) == 0:
+                data = msg.split(SET_OBJ_POSE)[1]
+                x, y, z, ro, pi, ya = unpack_vector(data, SET_OBJ_POSE_VEC_SIZE)
+                set_obj_pose(ee_obj, x, y, z, ro, pi, ya)
 
         except IndexError:
             break
@@ -233,6 +248,9 @@ class BlenderClientPanel(bpy.types.Panel):
 
     bpy.types.Scene.server_addr = StringProperty(name="Server Addr", default="localhost", description="Server Addr")
     bpy.types.Scene.server_port = IntProperty(name="Server Port", default=3001, description="Server Port")
+    
+    bpy.types.Scene.ee_object = bpy.props.PointerProperty(name="End-Effector Object", type=bpy.types.Object)
+    bpy.types.Scene.sb_object = bpy.props.PointerProperty(name="Soft Body", type=bpy.types.Object)
 
     def draw(self, context):
         global client
@@ -240,6 +258,12 @@ class BlenderClientPanel(bpy.types.Panel):
 
         row = layout.row()
         row.label(text="Blender Client!", icon='WORLD_DATA')
+
+        col = layout.column()
+        col.prop_search(context.scene, "ee_object", context.scene, "objects")
+
+        col = layout.column()
+        col.prop_search(context.scene, "sb_object", context.scene, "objects")
 
         row = layout.row()
         row.prop(context.scene, 'server_addr')
