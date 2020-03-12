@@ -22,12 +22,17 @@ from collections import Counter
 import time
 from _collections import deque
 import functools
+import numpy as np
+import os
 
 # Globals
 server_addr = ''
 server_port = 3004
 client = None
 rx_handle = None
+
+meshes_path = ''
+mapping_filepath = ''
 
 # GRAMMAR
 DISCONNECT = ""
@@ -42,10 +47,37 @@ GET_VTX_POS_VEC_SIZE = 1
 GET_VTX_COUNT_VEC_SIZE = 1
 
 data_queue = deque()
+vtx_pos_queue = deque()
 callback_idx = 0
 th_handle = None
+th2_handle = None
 exit_thread = False
+exit_thread2 = False
 update_handle = []
+update_handle_2 = []
+
+
+########
+def load_from_folder():
+    global mapping_filepath, meshes_path, vtx_pos_queue
+    mapping = np.genfromtxt(mapping_filepath)
+    files_list = sorted(os.listdir(meshes_path))
+    for file in files_list:
+        net_mesh = np.genfromtxt(meshes_path + file)
+        for i in range(len(mapping)):
+            ni = int(mapping[i][0])  # Network Vertex Index
+            bi = int(mapping[i][1])  # Blender Vertex Index
+            vtx_pos_queue.append([bi, net_mesh[ni, 0], net_mesh[ni, 1], net_mesh[ni, 2]])
+        time.sleep(0.01)
+
+
+def load_vtx_positions():
+    global th2_handle
+    th2_handle = threading.Thread(target=load_from_folder)
+    th2_handle.start()
+
+
+##########
 
 
 def pack_vector(vec, precission=3):
@@ -65,7 +97,7 @@ def pack_vector(vec, precission=3):
 def unpack_vector(data, length=1):
     v = None
     try:
-        items = data[data.find("(")+1:data.find(")")]
+        items = data[data.find("(") + 1:data.find(")")]
         v_str = items.split(',')
         if length != len(v_str):
             print('Warning! Required Length is not Equal to Actual Length')
@@ -84,7 +116,7 @@ def connect(addr=None, port=None):
         server_port = port
 
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
+
     try:
         client.connect((server_addr, server_port))
         client.setblocking(False)
@@ -110,6 +142,15 @@ def disconnect():
         client = None
 
 
+def stop_visualization():
+    global update_handle_2
+    print('Stop Called')
+    for h in update_handle_2:
+        if bpy.app.timers.is_registered(h):
+            bpy.app.timers.unregister(h)
+            print('Stopping Visual Update')
+
+
 def set_vtx_pos(obj, idx, x, y, z):
     if obj:
         # print('MOVING VTX(', idx, ') : ', x, y, z)
@@ -119,8 +160,8 @@ def set_vtx_pos(obj, idx, x, y, z):
             obj.data.vertices[idx].co = (x, y, z)
         else:
             print('Error, Vtx Idx Invalid')
-            
-            
+
+
 def set_obj_pose(obj, x, y, z, ro, pi, ya):
     if obj:
         obj.matrix_world.translation = (x, y, z)
@@ -180,7 +221,7 @@ def timer_update_func(object):
 
     if callback_idx % max_reqs == 0:
         print(callback_idx, ') ', len(data_queue))
-        
+
     ee_obj = bpy.context.scene.ee_object
     sb_obj = bpy.context.scene.sb_object
 
@@ -211,6 +252,22 @@ def timer_update_func(object):
     return 0.005
 
 
+def visualize_from_vtx_queue(context):
+    global vtx_pos_queue
+    # max of n request per call
+    vps = context.scene.vps
+    sb_obj = bpy.context.scene.sb_object
+    while vps:
+        try:
+            msg = vtx_pos_queue.popleft()
+            set_vtx_pos(sb_obj, msg[0], msg[1], msg[2], msg[3])
+
+        except IndexError:
+            break
+        vps = vps - 1
+    return 0.005
+
+
 class ConnectOperator(bpy.types.Operator):
     """Tooltip"""
     bl_idname = "scene.socket_connect_operator"
@@ -224,7 +281,7 @@ class ConnectOperator(bpy.types.Operator):
                 fn = functools.partial(timer_update_func, bpy.context.object)
                 bpy.app.timers.register(fn)
                 update_handle.append(fn)
-            
+
         return {'FINISHED'}
 
 
@@ -238,6 +295,32 @@ class DisconnectOperator(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class RunMeshesVisualizationOperator(bpy.types.Operator):
+    """Tooltip"""
+    bl_idname = "scene.run_meshes_visualization_operator"
+    bl_label = "Visualize Mesh"
+
+    def execute(self, context):
+        global mapping_filepath, meshes_path, update_handle_2
+        mapping_filepath = bpy.path.abspath(context.scene.jie_mapping_filepath)
+        meshes_path = bpy.path.abspath(context.scene.jie_meshes_path)
+        load_vtx_positions()
+        fn = functools.partial(visualize_from_vtx_queue, context)
+        bpy.app.timers.register(fn)
+        update_handle_2.append(fn)
+        return {'FINISHED'}
+
+
+class StopVisualizationOperator(bpy.types.Operator):
+    """Tooltip"""
+    bl_idname = "scene.stop_visualization_operator"
+    bl_label = "Stop"
+
+    def execute(self, context):
+        stop_visualization()
+        return {'FINISHED'}
+
+
 class BlenderClientPanel(bpy.types.Panel):
     """Creates a Panel in the Object properties window"""
     bl_label = "Blender Client Panel"
@@ -248,9 +331,26 @@ class BlenderClientPanel(bpy.types.Panel):
 
     bpy.types.Scene.server_addr = StringProperty(name="Server Addr", default="localhost", description="Server Addr")
     bpy.types.Scene.server_port = IntProperty(name="Server Port", default=3001, description="Server Port")
-    
+    bpy.types.Scene.vps = IntProperty(name="Vtx Per Sec", default=100, description="No. of Vertex Per Iteration")
+
     bpy.types.Scene.ee_object = bpy.props.PointerProperty(name="End-Effector Object", type=bpy.types.Object)
     bpy.types.Scene.sb_object = bpy.props.PointerProperty(name="Soft Body", type=bpy.types.Object)
+
+    bpy.types.Scene.jie_mapping_filepath = bpy.props.StringProperty \
+            (
+            name="Mapping Filepath",
+            default="",
+            description="Define the Mapping file",
+            subtype='FILE_PATH'
+        )
+
+    bpy.types.Scene.jie_meshes_path = bpy.props.StringProperty \
+            (
+            name="Meshes Path (Dir)",
+            default="",
+            description="Define the path to the meshes file",
+            subtype='DIR_PATH'
+        )
 
     def draw(self, context):
         global client
@@ -279,8 +379,27 @@ class BlenderClientPanel(bpy.types.Panel):
         row.enabled = bool(client)
         row.operator('scene.socket_disconnect_operator')
 
+        col = layout.column()
+        col.prop(context.scene, 'jie_mapping_filepath')
 
-classes = (ConnectOperator, DisconnectOperator, BlenderClientPanel)
+        col = layout.column()
+        col.prop(context.scene, 'jie_meshes_path')
+
+        col = layout.column()
+        col.prop(context.scene, 'vps')
+
+        col = layout.column()
+        col.operator('scene.run_meshes_visualization_operator')
+
+        col = layout.column()
+        col.operator('scene.stop_visualization_operator')
+
+
+classes = (ConnectOperator,
+           DisconnectOperator,
+           RunMeshesVisualizationOperator,
+           StopVisualizationOperator,
+           BlenderClientPanel)
 
 
 def register():
@@ -295,4 +414,4 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-    #ungregister()
+    # ungregister()
