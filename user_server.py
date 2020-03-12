@@ -1,8 +1,14 @@
+import os
+import sys
 import socket
 import time
 import math
+import numpy as np
 from data_utils import *
 from random import random
+
+#sys.path.insert(0,'../../deformable/')
+#import utils
 
 class UserServer:
     def __init__(self):
@@ -53,11 +59,11 @@ class UserServer:
         packet = self.client.recv(1024)
         packet = packet.decode()
         # print(packet)
-
+        time.sleep(0.5)
         if packet.find(GET_VTX_COUNT) == 0:
             data = packet.split(GET_VTX_COUNT)[1]
             v = unpack_vector(data, GET_VTX_COUNT_VEC_SIZE)
-
+        
         return int(v[0])
 
     def get_vtx_pos(self, idx):
@@ -105,13 +111,80 @@ class UserServer:
                 time.sleep(0.001)
 
 
-# us = UserServer()
-# us.create_server(port=3002)
-#
-# time.sleep(1)
-# Set the x,y,z position and roll, pitch, yaw
-# us.set_obj_pose(1, 1, 1, 0, 0, 0)
+    def surf_to_vol_map(idx, x, y, z):
+        if idx < y*z:
+            return idx
+        else:
+            idx 
 
-# us.test_sin_wave_equation()
-# us.shutdown_server()
+    def play_simulation(self, mesh_path, mapping):
+        mesh_files = os.listdir(mesh_path)
+        mesh_files = sorted(mesh_files)
+        for i in range(len(mesh_files)):
+            cur_mesh_path = mesh_path + mesh_files[i]
+            self.set_cube_vertices(cur_mesh_path, mapping)
+            print(i)
+            time.sleep(0.0001)
+            
+    def set_cube_vertices(self, mesh_path, mapping):
+        mesh = np.genfromtxt(mesh_path)
+        vtx_count = self.get_vtx_count()
+#        print(vtx_count)
+        for idx in range(vtx_count):
+            cur_map = mapping[idx]
+            cur_pt = mesh[cur_map[0]]
+#            print(cur_pt)#, self.get_vtx_pos(cur_map[1]))
+            self.set_vtx_pos(cur_map[1], cur_pt[0], cur_pt[1], cur_pt[2])
+            time.sleep(0.0006)
+
+    def make_mapping(self, mesh_path):
+        mesh = np.genfromtxt(mesh_path)
+        vtx_count = self.get_vtx_count()
+        blender_mesh = np.zeros((vtx_count,3))
+        for idx in range(vtx_count):
+            pos = self.get_vtx_pos(idx)
+            blender_mesh[idx] = [pos[1], pos[2], pos[3]]
+
+
+        ind = np.lexsort((blender_mesh[:,2], blender_mesh[:,1], blender_mesh[:,0]))
+        print(blender_mesh[ind][0:5])
+        mapping = []
+        i = 0
+        for x in range(23):
+            for y in range(12):
+                for z in range(13):
+                    if (x == 0) or (x == 22) or (y == 0) or (y == 11) or (z == 0) or (z == 12):
+                        mapping = mapping + [i]
+                    i = i + 1
+
+        mapping = np.concatenate((np.array(np.expand_dims(mapping,1),dtype=np.int32), np.expand_dims(ind,1)), axis=1)
+        np.savetxt('grid_order.txt',mapping,fmt='%i')
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        print('Please enter at 2 arguments (first indicating use and second mesh path)')
+        exit()
+        
+    us = UserServer()
+    us.create_server(port=3002)
+    mesh_path = sys.argv[2]
+    mapping = np.loadtxt('grid_order.txt', dtype=np.int)
+    if sys.argv[1] == 'show':
+        us.set_cube_vertices(mesh_path, mapping)
+    elif sys.argv[1] == 'map':
+        us.make_mapping(mesh_path)
+    elif sys.argv[1] == 'play':
+        us.play_simulation(mesh_path, mapping)
+    else:
+        print('Unknown command in first argument')
+#    mesh_path = sys.argv[1]
+#    mesh_files = os.listdir(mesh_path)
+#    mesh_files = sorted(mesh_files)
+
+#    for i in range(len(mesh_files)):
+#        mesh = np.genfromtxt(mesh_path + mesh_files[i])
+#        us.set_cube_vertices(mesh)
+#        time.sleep(1)
+    us.shutdown_server()
 
