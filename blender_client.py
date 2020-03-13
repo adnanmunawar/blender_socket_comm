@@ -145,6 +145,9 @@ def disconnect():
 def stop_visualization():
     global update_handle_2
     print('Stop Called')
+    print('Emptying Vertex Position Queue')
+    global vtx_pos_queue
+    vtx_pos_queue.clear()
     for h in update_handle_2:
         if bpy.app.timers.is_registered(h):
             bpy.app.timers.unregister(h)
@@ -301,13 +304,17 @@ class RunMeshesVisualizationOperator(bpy.types.Operator):
     bl_label = "Visualize Mesh"
 
     def execute(self, context):
-        global mapping_filepath, meshes_path, update_handle_2
+        global mapping_filepath, meshes_path, update_handle_2, vtx_pos_queue
         mapping_filepath = bpy.path.abspath(context.scene.jie_mapping_filepath)
         meshes_path = bpy.path.abspath(context.scene.jie_meshes_path)
-        load_vtx_positions()
-        fn = functools.partial(visualize_from_vtx_queue, context)
-        bpy.app.timers.register(fn)
-        update_handle_2.append(fn)
+        if len(vtx_pos_queue) > 0:
+            print('Patience Child! Queue is not empty yet')
+            print('Either press stop first, or wait for the queue to empty itself')
+        else:
+            load_vtx_positions()
+            fn = functools.partial(visualize_from_vtx_queue, context)
+            bpy.app.timers.register(fn)
+            update_handle_2.append(fn)
         return {'FINISHED'}
 
 
