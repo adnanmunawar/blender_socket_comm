@@ -55,20 +55,27 @@ exit_thread = False
 exit_thread2 = False
 update_handle = []
 update_handle_2 = []
+max_frames_to_load = 300
 
 
 ########
 def load_from_folder():
-    global mapping_filepath, meshes_path, vtx_pos_queue
+    global mapping_filepath, meshes_path, vtx_pos_queue, max_frames_to_load
     mapping = np.genfromtxt(mapping_filepath)
     files_list = sorted(os.listdir(meshes_path))
+    frame_load_counter = 0
+    print('Max Frames To Load: ', max_frames_to_load)
     for file in files_list:
+        if frame_load_counter >= max_frames_to_load:
+            break
         net_mesh = np.genfromtxt(meshes_path + file)
         for i in range(len(mapping)):
             ni = int(mapping[i][0])  # Network Vertex Index
             bi = int(mapping[i][1])  # Blender Vertex Index
             vtx_pos_queue.append([bi, net_mesh[ni, 0], net_mesh[ni, 1], net_mesh[ni, 2]])
         time.sleep(0.01)
+        frame_load_counter = frame_load_counter + 1
+    print('Number of Frames Loaded: ', frame_load_counter)
 
 
 def load_vtx_positions():
@@ -258,16 +265,16 @@ def timer_update_func(object):
 def visualize_from_vtx_queue(context):
     global vtx_pos_queue
     # max of n request per call
-    vps = context.scene.vps
+    vpf = context.scene.vpf
     sb_obj = bpy.context.scene.sb_object
-    while vps:
+    while vpf:
         try:
             msg = vtx_pos_queue.popleft()
             set_vtx_pos(sb_obj, msg[0], msg[1], msg[2], msg[3])
 
         except IndexError:
             break
-        vps = vps - 1
+        vpf = vpf - 1
     return 0.005
 
 
@@ -304,9 +311,10 @@ class RunMeshesVisualizationOperator(bpy.types.Operator):
     bl_label = "Visualize Mesh"
 
     def execute(self, context):
-        global mapping_filepath, meshes_path, update_handle_2, vtx_pos_queue
+        global mapping_filepath, meshes_path, update_handle_2, vtx_pos_queue, max_frames_to_load
         mapping_filepath = bpy.path.abspath(context.scene.jie_mapping_filepath)
         meshes_path = bpy.path.abspath(context.scene.jie_meshes_path)
+        max_frames_to_load = context.scene.max_frames_to_load
         if len(vtx_pos_queue) > 0:
             print('Patience Child! Queue is not empty yet')
             print('Either press stop first, or wait for the queue to empty itself')
@@ -338,7 +346,8 @@ class BlenderClientPanel(bpy.types.Panel):
 
     bpy.types.Scene.server_addr = StringProperty(name="Server Addr", default="localhost", description="Server Addr")
     bpy.types.Scene.server_port = IntProperty(name="Server Port", default=3001, description="Server Port")
-    bpy.types.Scene.vps = IntProperty(name="Vtx Per Sec", default=100, description="No. of Vertex Per Iteration")
+    bpy.types.Scene.vpf = IntProperty(name="Vtx Per Frame", default=100, description="No. of Vertex Per Iteration")
+    bpy.types.Scene.max_frames_to_load = IntProperty(name="Max Load Frames", default=300, description="No. of frames to load")
 
     bpy.types.Scene.ee_object = bpy.props.PointerProperty(name="End-Effector Object", type=bpy.types.Object)
     bpy.types.Scene.sb_object = bpy.props.PointerProperty(name="Soft Body", type=bpy.types.Object)
@@ -393,7 +402,10 @@ class BlenderClientPanel(bpy.types.Panel):
         col.prop(context.scene, 'jie_meshes_path')
 
         col = layout.column()
-        col.prop(context.scene, 'vps')
+        col.prop(context.scene, 'max_frames_to_load')
+
+        col = layout.column()
+        col.prop(context.scene, 'vpf')
 
         col = layout.column()
         col.operator('scene.run_meshes_visualization_operator')
