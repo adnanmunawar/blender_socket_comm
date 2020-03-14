@@ -314,6 +314,8 @@ class RunMeshesVisualizationOperator(bpy.types.Operator):
         global mapping_filepath, meshes_path, update_handle_2, vtx_pos_queue, max_frames_to_load
         mapping_filepath = bpy.path.abspath(context.scene.jie_mapping_filepath)
         meshes_path = bpy.path.abspath(context.scene.jie_meshes_path)
+        frames_dir_update_fn(self, context)
+        
         max_frames_to_load = context.scene.max_frames_to_load
         if len(vtx_pos_queue) > 0:
             print('Patience Child! Queue is not empty yet')
@@ -324,6 +326,13 @@ class RunMeshesVisualizationOperator(bpy.types.Operator):
             bpy.app.timers.register(fn)
             update_handle_2.append(fn)
         return {'FINISHED'}
+
+  
+def frames_dir_update_fn(self, context):
+    ## Get the number of frames (mesh) files found in the specified folder
+    meshes_path = bpy.path.abspath(context.scene.jie_meshes_path)
+    files_list = sorted(os.listdir(meshes_path))
+    context.scene.num_frames_found = len(files_list)
 
 
 class StopVisualizationOperator(bpy.types.Operator):
@@ -347,6 +356,7 @@ class BlenderClientPanel(bpy.types.Panel):
     bpy.types.Scene.server_addr = StringProperty(name="Server Addr", default="localhost", description="Server Addr")
     bpy.types.Scene.server_port = IntProperty(name="Server Port", default=3001, description="Server Port")
     bpy.types.Scene.vpf = IntProperty(name="Vtx Per Frame", default=100, description="No. of Vertex Per Iteration")
+    bpy.types.Scene.num_frames_found = IntProperty(name="Num Frames Found", default=0, description="No. of frames found")
     bpy.types.Scene.max_frames_to_load = IntProperty(name="Max Load Frames", default=300, description="No. of frames to load")
 
     bpy.types.Scene.ee_object = bpy.props.PointerProperty(name="End-Effector Object", type=bpy.types.Object)
@@ -365,7 +375,8 @@ class BlenderClientPanel(bpy.types.Panel):
             name="Meshes Path (Dir)",
             default="",
             description="Define the path to the meshes file",
-            subtype='DIR_PATH'
+            subtype='DIR_PATH',
+            update=frames_dir_update_fn
         )
 
     def draw(self, context):
@@ -400,6 +411,10 @@ class BlenderClientPanel(bpy.types.Panel):
 
         col = layout.column()
         col.prop(context.scene, 'jie_meshes_path')
+
+        col = layout.column()
+        col.prop(context.scene, 'num_frames_found')
+        col.enabled = False
 
         col = layout.column()
         col.prop(context.scene, 'max_frames_to_load')
