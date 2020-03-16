@@ -31,8 +31,27 @@ server_port = 3004
 client = None
 rx_handle = None
 
-meshes_path = ''
-mapping_filepath = ''
+
+class ConfigSB():
+    def __init__(self, type):
+        self.type = ''
+        self.meshes_path = ''
+        self.vtx_pos_queue = deque()
+        self.thread_handle = None
+        self.exit_thread = False
+        self.sb_object = None
+
+      
+class ConfigGlobal():
+    def __init__(self):
+        self.mapping_filepath = ''
+        self.max_frames_to_load = 300
+        self.sb_config_list = None
+        self.mapping = None
+
+
+config_global = ConfigGlobal()
+config_global.sb_config_list = [ConfigSB('Simulator'), ConfigSB('Network')]
 
 # GRAMMAR
 DISCONNECT = ""
@@ -47,7 +66,6 @@ GET_VTX_POS_VEC_SIZE = 1
 GET_VTX_COUNT_VEC_SIZE = 1
 
 data_queue = deque()
-vtx_pos_queue = deque()
 callback_idx = 0
 th_handle = None
 th2_handle = None
@@ -55,27 +73,29 @@ exit_thread = False
 exit_thread2 = False
 update_handle = []
 update_handle_2 = []
-max_frames_to_load = 300
 
 
 ########
 def load_from_folder():
-    global mapping_filepath, meshes_path, vtx_pos_queue, max_frames_to_load
-    mapping = np.genfromtxt(mapping_filepath)
-    files_list = sorted(os.listdir(meshes_path))
-    frame_load_counter = 0
-    print('Max Frames To Load: ', max_frames_to_load)
-    for file in files_list:
-        if frame_load_counter >= max_frames_to_load:
-            break
-        net_mesh = np.genfromtxt(meshes_path + file)
-        for i in range(len(mapping)):
-            ni = int(mapping[i][0])  # Network Vertex Index
-            bi = int(mapping[i][1])  # Blender Vertex Index
-            vtx_pos_queue.append([bi, net_mesh[ni, 0], net_mesh[ni, 1], net_mesh[ni, 2]])
-        time.sleep(0.01)
-        frame_load_counter = frame_load_counter + 1
-    print('Number of Frames Loaded: ', frame_load_counter)
+    global config_global
+    config_global.mapping = np.genfromtxt(config_global.mapping_filepath)
+    mapping = config_global.mapping
+    for sc in config_global.sb_config_list:
+        
+        files_list = sorted(os.listdir(sc.meshes_path))
+        frame_load_counter = 0
+        print('Max Frames To Load: ', config_global.max_frames_to_load)
+        for file in files_list:
+            if frame_load_counter >= config_global.max_frames_to_load:
+                break
+            net_mesh = np.genfromtxt(sc.meshes_path + file)
+            for i in range(len(mapping)):
+                ni = int(mapping[i][0])  # Network Vertex Index
+                bi = int(mapping[i][1])  # Blender Vertex Index
+                sc.vtx_pos_queue.append([bi, net_mesh[ni, 0], net_mesh[ni, 1], net_mesh[ni, 2], frame_load_counter])
+#            time.sleep(0.01)
+            frame_load_counter = frame_load_counter + 1
+        print('For File: ', sc.type, '. No. of Frames Loaded: ', frame_load_counter)
 
 
 def load_vtx_positions():
@@ -153,8 +173,10 @@ def stop_visualization():
     global update_handle_2
     print('Stop Called')
     print('Emptying Vertex Position Queue')
-    global vtx_pos_queue
-    vtx_pos_queue.clear()
+    global config_global
+    config_global.sb_config_list[0].vtx_pos_queue.clear()
+    config_global.sb_config_list[1].vtx_pos_queue.clear()
+    
     for h in update_handle_2:
         if bpy.app.timers.is_registered(h):
             bpy.app.timers.unregister(h)
@@ -232,8 +254,8 @@ def timer_update_func(object):
     if callback_idx % max_reqs == 0:
         print(callback_idx, ') ', len(data_queue))
 
-    ee_obj = bpy.context.scene.ee_object
-    sb_obj = bpy.context.scene.sb_object
+    ee_obj = bpy.context.scene.network_ee_object
+    sb_obj = bpy.context.scene.network_sb_object
 
     while max_reqs:
         try:
@@ -263,15 +285,15 @@ def timer_update_func(object):
 
 
 def visualize_from_vtx_queue(context):
-    global vtx_pos_queue
+    global config_global
     # max of n request per call
     vpf = context.scene.vpf
-    sb_obj = bpy.context.scene.sb_object
     while vpf:
         try:
-            msg = vtx_pos_queue.popleft()
-            set_vtx_pos(sb_obj, msg[0], msg[1], msg[2], msg[3])
-
+            for sc in config_global.sb_config_list:
+                msg = sc.vtx_pos_queue.popleft()
+                set_vtx_pos(sc.sb_object, msg[0], msg[1], msg[2], msg[3])
+                context.scene.simulating_frame_num = msg[4]
         except IndexError:
             break
         vpf = vpf - 1
@@ -308,31 +330,52 @@ class DisconnectOperator(bpy.types.Operator):
 class RunMeshesVisualizationOperator(bpy.types.Operator):
     """Tooltip"""
     bl_idname = "scene.run_meshes_visualization_operator"
-    bl_label = "Visualize Mesh"
+    bl_label = "Visualize"
 
     def execute(self, context):
-        global mapping_filepath, meshes_path, update_handle_2, vtx_pos_queue, max_frames_to_load
-        mapping_filepath = bpy.path.abspath(context.scene.jie_mapping_filepath)
-        meshes_path = bpy.path.abspath(context.scene.jie_meshes_path)
-        frames_dir_update_fn(self, context)
         
-        max_frames_to_load = context.scene.max_frames_to_load
-        if len(vtx_pos_queue) > 0:
-            print('Patience Child! Queue is not empty yet')
+        global config_global
+        
+        config_global.mapping_filepath = bpy.path.abspath(context.scene.mapping_filepath)
+        config_global.max_frames_to_load = context.scene.max_frames_to_load
+        
+        sb_list = config_global.sb_config_list
+        
+        sb_list[0].sb_object = bpy.context.scene.simulator_sb_object
+        sb_list[0].meshes_path = bpy.path.abspath(context.scene.simulator_meshes_path)
+        
+        sb_list[1].sb_object = bpy.context.scene.network_sb_object 
+        sb_list[1].meshes_path = bpy.path.abspath(context.scene.network_meshes_path)
+        
+        simulator_update_frames_dir(self, context)
+        network_update_frames_dir(self, context)
+        
+        if len(sb_list[0].vtx_pos_queue) > 0 or len(sb_list[1].vtx_pos_queue) > 0:
+            print('Patience child! Queue is not empty yet')
             print('Either press stop first, or wait for the queue to empty itself')
         else:
             load_vtx_positions()
             fn = functools.partial(visualize_from_vtx_queue, context)
             bpy.app.timers.register(fn)
             update_handle_2.append(fn)
+                
         return {'FINISHED'}
 
   
-def frames_dir_update_fn(self, context):
-    ## Get the number of frames (mesh) files found in the specified folder
-    meshes_path = bpy.path.abspath(context.scene.jie_meshes_path)
-    files_list = sorted(os.listdir(meshes_path))
-    context.scene.num_frames_found = len(files_list)
+def simulator_update_frames_dir(self, context):
+    global config_global
+    sb_conf = config_global.sb_config_list[0]
+    sb_conf.meshes_path = bpy.path.abspath(context.scene.simulator_meshes_path)
+    files_list = sorted(os.listdir(sb_conf.meshes_path))
+    context.scene.simulator_num_frames_found = len(files_list)
+
+  
+def network_update_frames_dir(self, context):
+    global config_global
+    sb_conf = config_global.sb_config_list[1]
+    sb_conf.meshes_path = bpy.path.abspath(context.scene.network_meshes_path)
+    files_list = sorted(os.listdir(sb_conf.meshes_path))
+    context.scene.network_num_frames_found = len(files_list)
 
 
 class StopVisualizationOperator(bpy.types.Operator):
@@ -355,14 +398,19 @@ class BlenderClientPanel(bpy.types.Panel):
 
     bpy.types.Scene.server_addr = StringProperty(name="Server Addr", default="localhost", description="Server Addr")
     bpy.types.Scene.server_port = IntProperty(name="Server Port", default=3001, description="Server Port")
-    bpy.types.Scene.vpf = IntProperty(name="Vtx Per Frame", default=100, description="No. of Vertex Per Iteration")
-    bpy.types.Scene.num_frames_found = IntProperty(name="Num Frames Found", default=0, description="No. of frames found")
-    bpy.types.Scene.max_frames_to_load = IntProperty(name="Max Load Frames", default=300, description="No. of frames to load")
+    bpy.types.Scene.vpf = IntProperty(name="Vtx Per Frame", default=100, min=0, description="No. of Vertex Per Iteration")
+    bpy.types.Scene.max_frames_to_load = IntProperty(name="Max Load Frames", default=300, min=0, description="No. of frames to load")
+    bpy.types.Scene.simulating_frame_num = IntProperty(name="Simulating Frame No.", default=0, description="Simulating Frame No.")
+    
+    bpy.types.Scene.simulator_num_frames_found = IntProperty(name="Simulator Frames Found", default=0, description="No. of simulator frames found")
+    bpy.types.Scene.simulator_ee_object = bpy.props.PointerProperty(name="Simulator End-Effector", type=bpy.types.Object)
+    bpy.types.Scene.simulator_sb_object = bpy.props.PointerProperty(name="Simulator Soft Body", type=bpy.types.Object)
+    
+    bpy.types.Scene.network_num_frames_found = IntProperty(name="Network Frames Found", default=0, description="No. of network frames found")
+    bpy.types.Scene.network_ee_object = bpy.props.PointerProperty(name="Network End-Effector", type=bpy.types.Object)
+    bpy.types.Scene.network_sb_object = bpy.props.PointerProperty(name="Network Soft Body", type=bpy.types.Object)
 
-    bpy.types.Scene.ee_object = bpy.props.PointerProperty(name="End-Effector Object", type=bpy.types.Object)
-    bpy.types.Scene.sb_object = bpy.props.PointerProperty(name="Soft Body", type=bpy.types.Object)
-
-    bpy.types.Scene.jie_mapping_filepath = bpy.props.StringProperty \
+    bpy.types.Scene.mapping_filepath = bpy.props.StringProperty \
             (
             name="Mapping Filepath",
             default="",
@@ -370,13 +418,22 @@ class BlenderClientPanel(bpy.types.Panel):
             subtype='FILE_PATH'
         )
 
-    bpy.types.Scene.jie_meshes_path = bpy.props.StringProperty \
+    bpy.types.Scene.simulator_meshes_path = bpy.props.StringProperty \
             (
-            name="Meshes Path (Dir)",
+            name="Simulator Meshes Path (Dir)",
             default="",
             description="Define the path to the meshes file",
             subtype='DIR_PATH',
-            update=frames_dir_update_fn
+            update=simulator_update_frames_dir
+        )
+
+    bpy.types.Scene.network_meshes_path = bpy.props.StringProperty \
+            (
+            name="Network Meshes Path (Dir)",
+            default="",
+            description="Define the path to the meshes file",
+            subtype='DIR_PATH',
+            update=network_update_frames_dir
         )
 
     def draw(self, context):
@@ -386,11 +443,19 @@ class BlenderClientPanel(bpy.types.Panel):
         row = layout.row()
         row.label(text="Blender Client!", icon='WORLD_DATA')
 
-        col = layout.column()
-        col.prop_search(context.scene, "ee_object", context.scene, "objects")
+        box = layout.box()
+        col = box.column()
+        col.prop_search(context.scene, "simulator_ee_object", context.scene, "objects")
 
-        col = layout.column()
-        col.prop_search(context.scene, "sb_object", context.scene, "objects")
+        col = box.column()
+        col.prop_search(context.scene, "simulator_sb_object", context.scene, "objects")
+
+        box = layout.box()
+        col = box.column()
+        col.prop_search(context.scene, "network_ee_object", context.scene, "objects")
+
+        col = box.column()
+        col.prop_search(context.scene, "network_sb_object", context.scene, "objects")
 
         row = layout.row()
         row.prop(context.scene, 'server_addr')
@@ -407,13 +472,22 @@ class BlenderClientPanel(bpy.types.Panel):
         row.operator('scene.socket_disconnect_operator')
 
         col = layout.column()
-        col.prop(context.scene, 'jie_mapping_filepath')
+        col.prop(context.scene, 'mapping_filepath')
 
-        col = layout.column()
-        col.prop(context.scene, 'jie_meshes_path')
+        box = layout.box()
+        col = box.column()
+        col.prop(context.scene, 'simulator_meshes_path')
 
-        col = layout.column()
-        col.prop(context.scene, 'num_frames_found')
+        col = box.column()
+        col.prop(context.scene, 'simulator_num_frames_found')
+        col.enabled = False
+
+        box = layout.box()
+        col = box.column()
+        col.prop(context.scene, 'network_meshes_path')
+
+        col = box.column()
+        col.prop(context.scene, 'network_num_frames_found')
         col.enabled = False
 
         col = layout.column()
@@ -427,6 +501,10 @@ class BlenderClientPanel(bpy.types.Panel):
 
         col = layout.column()
         col.operator('scene.stop_visualization_operator')
+        
+        col = layout.column()
+        col.prop(context.scene, 'simulating_frame_num')
+        col.enabled = False
 
 
 classes = (ConnectOperator,
