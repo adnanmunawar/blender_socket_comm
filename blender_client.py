@@ -34,12 +34,15 @@ rx_handle = None
 
 class ConfigSB():
     def __init__(self, type):
-        self.type = ''
+        self.type = type
         self.meshes_path = ''
+        self.ee_traj_path = ''
         self.vtx_pos_queue = deque()
+        self.ee_pose_queue = deque()
         self.thread_handle = None
         self.exit_thread = False
         self.sb_object = None
+        self.ee_object = None
 
       
 class ConfigGlobal():
@@ -81,18 +84,20 @@ def load_from_folder():
     config_global.mapping = np.genfromtxt(config_global.mapping_filepath)
     mapping = config_global.mapping
     for sc in config_global.sb_config_list:
-        
-        files_list = sorted(os.listdir(sc.meshes_path))
+        ee_traj = np.genfromtxt(bpy.path.abspath(sc.ee_traj_path), delimiter=',')
+        mesh_files_list = sorted(os.listdir(sc.meshes_path))
         frame_load_counter = 0
         print('Max Frames To Load: ', config_global.max_frames_to_load)
-        for file in files_list:
+        for mesh_file in mesh_files_list:
             if frame_load_counter >= config_global.max_frames_to_load:
                 break
-            net_mesh = np.genfromtxt(sc.meshes_path + file)
+            # Append Position ANd Quaternion
+            mesh_geometry = np.genfromtxt(sc.meshes_path + mesh_file)
             for i in range(len(mapping)):
                 ni = int(mapping[i][0])  # Network Vertex Index
                 bi = int(mapping[i][1])  # Blender Vertex Index
-                sc.vtx_pos_queue.append([bi, net_mesh[ni, 0], net_mesh[ni, 1], net_mesh[ni, 2], frame_load_counter])
+                sc.vtx_pos_queue.append([bi, mesh_geometry[ni, 0], mesh_geometry[ni, 1], mesh_geometry[ni, 2], frame_load_counter])
+                #sc.ee_pose_queue.append([ee_traj[i, 1], ee_traj[i, 2], ee_traj[i, 3], ee_traj[i, 4], ee_traj[i, 5], ee_traj[i, 6], ee_traj[i, 7]])
 #            time.sleep(0.01)
             frame_load_counter = frame_load_counter + 1
         print('For File: ', sc.type, '. No. of Frames Loaded: ', frame_load_counter)
@@ -175,7 +180,9 @@ def stop_visualization():
     print('Emptying Vertex Position Queue')
     global config_global
     config_global.sb_config_list[0].vtx_pos_queue.clear()
+    config_global.sb_config_list[0].ee_pose_queue.clear()
     config_global.sb_config_list[1].vtx_pos_queue.clear()
+    config_global.sb_config_list[1].ee_pose_queue.clear()
     
     for h in update_handle_2:
         if bpy.app.timers.is_registered(h):
@@ -194,10 +201,25 @@ def set_vtx_pos(obj, idx, x, y, z):
             print('Error, Vtx Idx Invalid')
 
 
-def set_obj_pose(obj, x, y, z, ro, pi, ya):
+def set_obj_pos(obj, x, y, z):
     if obj:
         obj.matrix_world.translation = (x, y, z)
+
+
+def set_obj_rot(obj, ro, pi, ya):
+    if obj:
         obj.rotation_euler = (ro, pi, ya)
+
+
+def set_obj_rot_quat(obj, x, y, z, w):
+    if obj:
+        q = Quaternion([w, x, y, z])
+        obj.rotation_quaternion = q
+
+
+def set_obj_pose(obj, x, y, z, ro, pi, ya):
+    set_obj_pos(obj, x, y, z)
+    sef_obj_rot(obj, ro, pi, ya)
 
 
 def get_vtx_count(obj):
@@ -283,18 +305,28 @@ def timer_update_func(object):
         max_reqs = max_reqs - 1
     return 0.005
 
+frame_counter = 0
 
 def visualize_from_vtx_queue(context):
-    global config_global
+    global config_global, frame_counter
     # max of n request per call
     vpf = context.scene.vpf
     while vpf:
         try:
             for sc in config_global.sb_config_list:
-                msg = sc.vtx_pos_queue.popleft()
-                set_vtx_pos(sc.sb_object, msg[0], msg[1], msg[2], msg[3])
-                context.scene.simulating_frame_num = msg[4]
+                mesh_msg = sc.vtx_pos_queue.popleft()
+                set_vtx_pos(sc.sb_object, mesh_msg[0], mesh_msg[1], mesh_msg[2], mesh_msg[3])
+                
+                if mesh_msg[4] > frame_counter:
+                    frame_counter = mesh_msg[4]
+                    context.scene.simulating_frame_num = frame_counter
+                    
+                    pose_msg = sc.ee_pose_queue.popleft()
+                    pose_msg = 1000 * pose_msg
+                    set_obj_pos(sc.ee_object, pose_msg[0], pose_msg[1], pose_msg[2])
+#                    print('EE: \"', sc.ee_object.name, '\" Pose: ', pose_msg[0], pose_msg[1], pose_msg[2])
         except IndexError:
+#            stop_visualization()
             break
         vpf = vpf - 1
     return 0.005
@@ -334,7 +366,7 @@ class RunMeshesVisualizationOperator(bpy.types.Operator):
 
     def execute(self, context):
         
-        global config_global
+        global config_global, frame_counter
         
         config_global.mapping_filepath = bpy.path.abspath(context.scene.mapping_filepath)
         config_global.max_frames_to_load = context.scene.max_frames_to_load
@@ -342,15 +374,20 @@ class RunMeshesVisualizationOperator(bpy.types.Operator):
         sb_list = config_global.sb_config_list
         
         sb_list[0].sb_object = bpy.context.scene.simulator_sb_object
+        sb_list[0].ee_object = bpy.context.scene.simulator_ee_object
         sb_list[0].meshes_path = bpy.path.abspath(context.scene.simulator_meshes_path)
         
         sb_list[1].sb_object = bpy.context.scene.network_sb_object 
+        sb_list[1].ee_object = bpy.context.scene.network_ee_object 
         sb_list[1].meshes_path = bpy.path.abspath(context.scene.network_meshes_path)
         
         simulator_update_frames_dir(self, context)
+        simulator_update_ee_traj_dir(self, context)
         network_update_frames_dir(self, context)
+        network_update_ee_traj_dir(self, context)
         
         if len(sb_list[0].vtx_pos_queue) > 0 or len(sb_list[1].vtx_pos_queue) > 0:
+            print('Queue Length', len(sb_list[0].vtx_pos_queue), len(sb_list[1].vtx_pos_queue))
             print('Patience child! Queue is not empty yet')
             print('Either press stop first, or wait for the queue to empty itself')
         else:
@@ -358,6 +395,8 @@ class RunMeshesVisualizationOperator(bpy.types.Operator):
             fn = functools.partial(visualize_from_vtx_queue, context)
             bpy.app.timers.register(fn)
             update_handle_2.append(fn)
+            
+        frame_counter = 0
                 
         return {'FINISHED'}
 
@@ -370,12 +409,23 @@ def simulator_update_frames_dir(self, context):
     context.scene.simulator_num_frames_found = len(files_list)
 
   
+def simulator_update_ee_traj_dir(self, context):
+    global config_global
+    sb_conf = config_global.sb_config_list[0]
+    sb_conf.ee_traj_path = bpy.path.abspath(context.scene.simulator_ee_traj_path)
+
+  
 def network_update_frames_dir(self, context):
     global config_global
     sb_conf = config_global.sb_config_list[1]
     sb_conf.meshes_path = bpy.path.abspath(context.scene.network_meshes_path)
     files_list = sorted(os.listdir(sb_conf.meshes_path))
     context.scene.network_num_frames_found = len(files_list)
+  
+def network_update_ee_traj_dir(self, context):
+    global config_global
+    sb_conf = config_global.sb_config_list[1]
+    sb_conf.ee_traj_path = bpy.path.abspath(context.scene.network_ee_traj_path)
 
 
 class StopVisualizationOperator(bpy.types.Operator):
@@ -427,6 +477,15 @@ class BlenderClientPanel(bpy.types.Panel):
             update=simulator_update_frames_dir
         )
 
+    bpy.types.Scene.simulator_ee_traj_path = bpy.props.StringProperty \
+            (
+            name="Simulator EE Trajectory Path (Dir)",
+            default="",
+            description="Define the path to the ee trajectory path",
+            subtype='FILE_PATH',
+            update=simulator_update_ee_traj_dir
+        )
+
     bpy.types.Scene.network_meshes_path = bpy.props.StringProperty \
             (
             name="Network Meshes Path (Dir)",
@@ -434,6 +493,15 @@ class BlenderClientPanel(bpy.types.Panel):
             description="Define the path to the meshes file",
             subtype='DIR_PATH',
             update=network_update_frames_dir
+        )
+
+    bpy.types.Scene.network_ee_traj_path = bpy.props.StringProperty \
+            (
+            name="Network EE Trajectory Path (Dir)",
+            default="",
+            description="Define the path to the ee trajectory path",
+            subtype='FILE_PATH',
+            update=network_update_ee_traj_dir
         )
 
     def draw(self, context):
@@ -475,16 +543,26 @@ class BlenderClientPanel(bpy.types.Panel):
         col.prop(context.scene, 'mapping_filepath')
 
         box = layout.box()
+        box.label(text='SIMULATION')
+        
         col = box.column()
-        col.prop(context.scene, 'simulator_meshes_path')
+        col.prop(context.scene, 'simulator_ee_traj_path', text='EE Traj Path')
+        
+        col = box.column()
+        col.prop(context.scene, 'simulator_meshes_path', text='Meshes Path')
 
         col = box.column()
         col.prop(context.scene, 'simulator_num_frames_found')
         col.enabled = False
 
         box = layout.box()
+        box.label(text='NETWORK')
+        
         col = box.column()
-        col.prop(context.scene, 'network_meshes_path')
+        col.prop(context.scene, 'network_ee_traj_path', text='EE Traj Path')
+        
+        col = box.column()
+        col.prop(context.scene, 'network_meshes_path', text='Meshes Path')
 
         col = box.column()
         col.prop(context.scene, 'network_num_frames_found')
@@ -527,3 +605,4 @@ def unregister():
 if __name__ == "__main__":
     register()
     # ungregister()
+4
